@@ -7,7 +7,8 @@ import json
 import os, subprocess, sys
 import os.path as osp
 import string
-import tensorflow as tf
+import torch
+from torch import nn
 from textwrap import dedent
 
 
@@ -23,7 +24,7 @@ SUBSTITUTIONS = {'env': 'env_name',
                  'dt': 'datestamp'}
 
 # Only some algorithms can be parallelized (have num_cpu > 1):
-MPI_COMPATIBLE_ALGOS = ['vpg', 'trpo', 'ppo']
+MPI_COMPATIBLE_ALGOS = [] # 'vpg', 'trpo', 'ppo'
 
 
 def friendly_err(err_msg):

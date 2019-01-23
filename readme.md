@@ -1,9 +1,13 @@
-**Status:** Active (under active development, breaking changes may occur)
+**Note:** This repository is an attempt to convert the [OpenAI's SpinningUP](https://github.com/openai/spinningup/) from Tensorflow to Pytorch.
 
-Welcome to Spinning Up in Deep RL! 
-==================================
+**Status:** In-progress, see the list of what's working at the bottom of the README.
 
-This is an educational resource produced by OpenAI that makes it easier to learn about deep reinforcement learning (deep RL).
+**Status OpenAI:** Active (under active development, breaking changes may occur)
+
+Welcome to Spinning Up in Deep RL with Pytorch! 
+===============================================
+
+This is an educational resource originally produced by OpenAI that makes it easier to learn about deep reinforcement learning (deep RL).
 
 For the unfamiliar: [reinforcement learning](https://en.wikipedia.org/wiki/Reinforcement_learning) (RL) is a machine learning approach for teaching agents how to solve tasks by trial and error. Deep RL refers to the combination of RL with [deep learning](http://ufldl.stanford.edu/tutorial/).
 
@@ -16,3 +20,18 @@ This module contains a variety of helpful resources, including:
 - and a few [exercises](https://spinningup.openai.com/en/latest/spinningup/exercises.html) to serve as warm-ups.
 
 Get started at [spinningup.openai.com](https://spinningup.openai.com)!
+
+
+----------
+#### Working:
+* Setup process (now in python 3.7)
+* VPG (CPU, single GPU)
+
+#### TODO (up next):
+* Adapt Logger (model/env saver) to Pytorch
+* MPI pytorch
+* KL divergence value is NaN, since None is returned.
+
+#### Known issues:
+* A difference has been noticed when training a simple environment, for TF default parameters would get Cartpole AverageEpRet to 100  for pytorch it barely gets over 40, (if the lr is changed to 0.01 for both PI and V learners, then it easily reaches 200)
+* --hid[h] [16, 32] Number of parameters with TF (pi: 690, v: 657), with Pytorch (pi: 226, v: 193) for CartPole
