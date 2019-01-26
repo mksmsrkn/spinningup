@@ -222,7 +222,7 @@ def vpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
         actor_critic.eval()
 
         # Log changes from update
-        _, logp, _, v = actor_critic(obs, act)
+        _, logp, _, val = actor_critic(obs, act)
         pi_l_new = -(logp * adv).mean()
         v_l_new = ((ret - val)**2).mean()
         kl = (logp_old - logp).mean()
