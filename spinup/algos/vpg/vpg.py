@@ -204,7 +204,7 @@ def vpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
 
         # VPG objectives
         pi_loss = -(logp * adv).mean()
-        v_l_old = adv.pow(2).mean()
+        v_l_old = ((ret - val)**2).mean()
 
         # Policy gradient step
         train_pi.zero_grad()
