@@ -30,7 +30,6 @@ Get started at [spinningup.openai.com](https://spinningup.openai.com)!
 #### TODO (up next):
 * Adapt Logger (model/env saver) to Pytorch
 * MPI pytorch
-* KL divergence value is NaN, since None is returned.
 
 #### Known issues:
 * A difference has been noticed when training a simple environment, for TF default parameters would get Cartpole AverageEpRet to 100  for pytorch it barely gets over 40, (if the lr is changed to 0.01 for both PI and V learners, then it easily reaches 200)

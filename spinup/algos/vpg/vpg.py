@@ -241,7 +241,7 @@ def vpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
             a, logp_t, logp_pi_t, v_t = actor_critic(Tensor(o.reshape(1,-1)).to(device))
 
             # save and log
-            buf.store(o, a.cpu().numpy(), r, v_t.item(), logp_t)
+            buf.store(o, a.cpu().numpy(), r, v_t.item(), logp_pi_t.cpu().detach().numpy())
             logger.store(VVals=v_t)
 
             o, r, d, _ = env.step(a.cpu().numpy())
