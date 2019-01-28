@@ -26,6 +26,7 @@ Get started at [spinningup.openai.com](https://spinningup.openai.com)!
 #### Working:
 * Setup process (now in python 3.7)
 * VPG (CPU, single GPU)
+* PPO (CPU, single GPU)
 
 #### TODO (up next):
 * Adapt Logger (model/env saver) to Pytorch
