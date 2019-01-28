@@ -1,5 +1,5 @@
 # Algorithms
-# from spinup.algos.ddpg.ddpg import ddpg
+from spinup.algos.ddpg.ddpg import ddpg
 from spinup.algos.ppo.ppo import ppo
 # from spinup.algos.sac.sac import sac
 # from spinup.algos.td3.td3 import td3

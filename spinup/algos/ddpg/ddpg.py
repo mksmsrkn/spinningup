@@ -1,11 +1,14 @@
 import numpy as np
-import tensorflow as tf
+import torch
+from torch import optim
+from torch import Tensor
 import gym
 import time
 from spinup.algos.ddpg import core
-from spinup.algos.ddpg.core import get_vars
 from spinup.utils.logx import EpochLogger
 
+# TODO multiple devices
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class ReplayBuffer:
     """
@@ -42,7 +45,7 @@ class ReplayBuffer:
 Deep Deterministic Policy Gradient (DDPG)
 
 """
-def ddpg(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0, 
+def ddpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
          steps_per_epoch=5000, epochs=100, replay_size=int(1e6), gamma=0.99, 
          polyak=0.995, pi_lr=1e-3, q_lr=1e-3, batch_size=100, start_steps=10000, 
          act_noise=0.1, max_ep_len=1000, logger_kwargs=dict(), save_freq=1):
@@ -113,12 +116,15 @@ def ddpg(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
             the current policy and value function.
 
     """
-
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
 
-    tf.set_random_seed(seed)
+    torch.manual_seed(seed)
     np.random.seed(seed)
+
+    # https://pytorch.org/docs/master/notes/randomness.html#cudnn
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     env, test_env = env_fn(), env_fn()
     obs_dim = env.observation_space.shape[0]
@@ -130,56 +136,30 @@ def ddpg(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
     # Share information about action space with policy architecture
     ac_kwargs['action_space'] = env.action_space
 
-    # Inputs to computation graph
-    x_ph, a_ph, x2_ph, r_ph, d_ph = core.placeholders(obs_dim, act_dim, obs_dim, None, None)
-
-    # Main outputs from computation graph
-    with tf.variable_scope('main'):
-        pi, q, q_pi = actor_critic(x_ph, a_ph, **ac_kwargs)
-    
-    # Target networks
-    with tf.variable_scope('target'):
-        # Note that the action placeholder going to actor_critic here is 
-        # irrelevant, because we only need q_targ(s, pi_targ(s)).
-        pi_targ, _, q_pi_targ  = actor_critic(x2_ph, a_ph, **ac_kwargs)
-
     # Experience buffer
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
 
+    actor_critic_main = actor_critic(obs_dim, **ac_kwargs).to(device)
+    # Note that the action placeholder going to targer actor_critic here
+    # is irrelevant, because we only need q_targ(s, pi_targ(s)).
+    actor_critic_target = actor_critic(obs_dim, **ac_kwargs).to(device)
+
     # Count variables
-    var_counts = tuple(core.count_vars(scope) for scope in ['main/pi', 'main/q', 'main'])
-    print('\nNumber of parameters: \t pi: %d, \t q: %d, \t total: %d\n'%var_counts)
+    var_counts = tuple(core.count_vars(model) for model in [actor_critic_main.q,
+                                                            actor_critic_main.pi,
+                                                            actor_critic_main])
+    logger.log('\nNumber of parameters: \t pi: %d, \t q: %d, \t total: %d\n'%var_counts)
 
-    # Bellman backup for Q function
-    backup = tf.stop_gradient(r_ph + gamma*(1-d_ph)*q_pi_targ)
-
-    # DDPG losses
-    pi_loss = -tf.reduce_mean(q_pi)
-    q_loss = tf.reduce_mean((q-backup)**2)
-
-    # Separate train ops for pi, q
-    pi_optimizer = tf.train.AdamOptimizer(learning_rate=pi_lr)
-    q_optimizer = tf.train.AdamOptimizer(learning_rate=q_lr)
-    train_pi_op = pi_optimizer.minimize(pi_loss, var_list=get_vars('main/pi'))
-    train_q_op = q_optimizer.minimize(q_loss, var_list=get_vars('main/q'))
-
-    # Polyak averaging for target variables
-    target_update = tf.group([tf.assign(v_targ, polyak*v_targ + (1-polyak)*v_main)
-                              for v_main, v_targ in zip(get_vars('main'), get_vars('target'))])
-
-    # Initializing targets to match main variables
-    target_init = tf.group([tf.assign(v_targ, v_main)
-                              for v_main, v_targ in zip(get_vars('main'), get_vars('target'))])
-
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
-    sess.run(target_init)
+    # Optimizers
+    pi_optimizer = optim.Adam(actor_critic_main.pi.parameters(), lr=pi_lr)
+    q_optimizer = optim.Adam(actor_critic_main.q.parameters(), lr=q_lr)
 
     # Setup model saving
-    logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph}, outputs={'pi': pi, 'q': q})
+    # logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph}, outputs={'pi': pi, 'q': q}) # TODO configure logger
 
     def get_action(o, noise_scale):
-        a = sess.run(pi, feed_dict={x_ph: o.reshape(1,-1)})[0]
+        a = actor_critic_main(Tensor(o.reshape(1,-1)).to(device))
+        a = a.cpu().detach().numpy()
         a += noise_scale * np.random.randn(act_dim)
         return np.clip(a, -act_limit, act_limit)
 
@@ -234,20 +214,36 @@ def ddpg(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
             """
             for _ in range(ep_len):
                 batch = replay_buffer.sample_batch(batch_size)
-                feed_dict = {x_ph: batch['obs1'],
-                             x2_ph: batch['obs2'],
-                             a_ph: batch['acts'],
-                             r_ph: batch['rews'],
-                             d_ph: batch['done']
-                            }
+                x, x2, a, r, d = [Tensor(batch[k]).to(device) for k in
+                                  ['obs1', 'obs2', 'acts', 'rews', 'done']]
+
+                _, q, q_pi = actor_critic_main(x, a)
+                _, _, q_pi_targ = actor_critic_target(x2, a)
+
+                # Bellman backup for Q function
+                backup = (r + gamma*(1-d)*q_pi_targ).detach()
+
+                # DDPG losses
+                pi_loss = -q_pi.mean()
+                q_loss = ((q-backup)**2).mean()
 
                 # Q-learning update
-                outs = sess.run([q_loss, q, train_q_op], feed_dict)
-                logger.store(LossQ=outs[0], QVals=outs[1])
+                q_optimizer.zero_grad()
+                q_loss.backward()
+                q_optimizer.step()
+                logger.store(LossQ=q_loss, QVals=q.cpu().detach().numpy())
 
                 # Policy update
-                outs = sess.run([pi_loss, train_pi_op, target_update], feed_dict)
-                logger.store(LossPi=outs[0])
+                pi_optimizer.zero_grad()
+                pi_loss.backward()
+                pi_optimizer.step()
+                logger.store(LossPi=pi_loss)
+
+                # Polyak averaging for target variables
+                # Credits: https://github.com/ghliu/pytorch-ddpg/blob/master/util.py
+                params = zip(actor_critic_target.parameters(), actor_critic_main.parameters())
+                for ac_target, ac_main in params:
+                    ac_target.data.copy_(ac_main.data * (1.0 - polyak) + ac_target.data * polyak)
 
             logger.store(EpRet=ep_ret, EpLen=ep_len)
             o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0
