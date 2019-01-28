@@ -192,7 +192,7 @@ def vpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
     # sync_all_params() # TODO figure out the way to do use MPI for pytorch
 
     ## Setup model saving
-    # logger.setup_tf_saver(sess, inputs={'x': x_ph}, outputs={'pi': pi, 'v': v}) # configure logger
+    # logger.setup_tf_saver(sess, inputs={'x': x_ph}, outputs={'pi': pi, 'v': v}) # TODO configure logger
 
     def update():
         actor_critic.train()

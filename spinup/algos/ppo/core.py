@@ -1,5 +1,7 @@
 import numpy as np
-import tensorflow as tf
+import torch
+from torch import nn
+from torch.distributions import Normal, Categorical
 import scipy.signal
 from gym.spaces import Box, Discrete
 
@@ -10,37 +12,26 @@ def combined_shape(length, shape=None):
         return (length,)
     return (length, shape) if np.isscalar(shape) else (length, *shape)
 
-def placeholder(dim=None):
-    return tf.placeholder(dtype=tf.float32, shape=combined_shape(None,dim))
+class MLP(nn.Module):
+    def __init__(self, in_dim, hidden_sizes=(64,64), activation=nn.Tanh, output_activation=None):
+        super(MLP, self).__init__()
+        layers = []
+        prev_h = in_dim
+        for h in hidden_sizes[1:-1]:
+            layers.append(nn.Linear(prev_h, h))
+            layers.append(activation())
+            prev_h = h
+        layers.append(nn.Linear(h, hidden_sizes[-1]))
+        if output_activation:
+            layers.append(output_activation(-1))
+        self.model = nn.Sequential(*layers)
 
-def placeholders(*args):
-    return [placeholder(dim) for dim in args]
+    def forward(self, x):
+        return self.model(x).squeeze()
 
-def placeholder_from_space(space):
-    if isinstance(space, Box):
-        return placeholder(space.shape)
-    elif isinstance(space, Discrete):
-        return tf.placeholder(dtype=tf.int32, shape=(None,))
-    raise NotImplementedError
-
-def placeholders_from_spaces(*args):
-    return [placeholder_from_space(space) for space in args]
-
-def mlp(x, hidden_sizes=(32,), activation=tf.tanh, output_activation=None):
-    for h in hidden_sizes[:-1]:
-        x = tf.layers.dense(x, units=h, activation=activation)
-    return tf.layers.dense(x, units=hidden_sizes[-1], activation=output_activation)
-
-def get_vars(scope=''):
-    return [x for x in tf.trainable_variables() if scope in x.name]
-
-def count_vars(scope=''):
-    v = get_vars(scope)
-    return sum([np.prod(var.shape.as_list()) for var in v])
-
-def gaussian_likelihood(x, mu, log_std):
-    pre_sum = -0.5 * (((x-mu)/(tf.exp(log_std)+EPS))**2 + 2*log_std + np.log(2*np.pi))
-    return tf.reduce_sum(pre_sum, axis=1)
+# Credit: https://discuss.pytorch.org/t/how-do-i-check-the-number-of-parameters-of-a-model/4325/9
+def count_vars(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def discount_cumsum(x, discount):
     """
@@ -59,46 +50,56 @@ def discount_cumsum(x, discount):
     """
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
-
 """
 Policies
 """
+class MLPCategorical(nn.Module):
+    def __init__(self, in_dim, out_dim, hidden_sizes=(64,64), activation=nn.Tanh,
+                 output_activation=nn.Softmax):
+        super(MLPCategorical, self).__init__()
+        self.probs = MLP(in_dim, list(hidden_sizes)+[out_dim], activation, output_activation)
 
-def mlp_categorical_policy(x, a, hidden_sizes, activation, output_activation, action_space):
-    act_dim = action_space.n
-    logits = mlp(x, list(hidden_sizes)+[act_dim], activation, None)
-    logp_all = tf.nn.log_softmax(logits)
-    pi = tf.squeeze(tf.multinomial(logits,1), axis=1)
-    logp = tf.reduce_sum(tf.one_hot(a, depth=act_dim) * logp_all, axis=1)
-    logp_pi = tf.reduce_sum(tf.one_hot(pi, depth=act_dim) * logp_all, axis=1)
-    return pi, logp, logp_pi
+    def forward(self, x, a = None):
+        probs = self.probs(x)
+        dist = Categorical(probs)
+        pi = dist.sample()
+        logp = dist.log_prob(a) if a is not None else None
+        logp_pi = dist.log_prob(pi)
+        return pi, logp, logp_pi
 
+class MLPGaussian(nn.Module):
+    def __init__(self, in_dim, out_dim, hidden_sizes=(64,64), activation=nn.Tanh, output_activation=None):
+        super(MLPGaussian, self).__init__()
+        self.mu = MLP(in_dim, list(hidden_sizes)+[out_dim], activation, output_activation)
+        self.log_std = nn.Parameter(-0.5 * torch.ones(out_dim, dtype=torch.float32))
 
-def mlp_gaussian_policy(x, a, hidden_sizes, activation, output_activation, action_space):
-    act_dim = a.shape.as_list()[-1]
-    mu = mlp(x, list(hidden_sizes)+[act_dim], activation, output_activation)
-    log_std = tf.get_variable(name='log_std', initializer=-0.5*np.ones(act_dim, dtype=np.float32))
-    std = tf.exp(log_std)
-    pi = mu + tf.random_normal(tf.shape(mu)) * std
-    logp = gaussian_likelihood(a, mu, log_std)
-    logp_pi = gaussian_likelihood(pi, mu, log_std)
-    return pi, logp, logp_pi
-
+    def forward(self, x, a = None):
+        mu = self.mu(x)
+        sigma = self.log_std.exp()
+        dist = Normal(mu, sigma)
+        pi = dist.sample()
+        logp = dist.log_prob(a).sum(dim=1) if a is not None else None
+        logp_pi = dist.log_prob(pi).sum()
+        return pi, logp, logp_pi
 
 """
 Actor-Critics
 """
-def mlp_actor_critic(x, a, hidden_sizes=(64,64), activation=tf.tanh, 
-                     output_activation=None, policy=None, action_space=None):
+class ActorCritic(nn.Module):
+    def __init__(self, state, hidden_sizes=(64,64), activation=nn.Tanh,
+                 output_activation=None, policy=None, action_space=None):
+        super(ActorCritic, self).__init__()
+        assert len(state) == 1
+        # default policy builder depends on action space
+        if policy is None and isinstance(action_space, Box):
+            self.policy = MLPGaussian(state[0], action_space.shape[0], hidden_sizes, activation, output_activation)
+        elif policy is None and isinstance(action_space, Discrete):
+            self.policy = MLPCategorical(state[0], action_space.n, hidden_sizes, activation, nn.Softmax)
+        else:
+            self.policy = MLP(state[0], hidden_sizes, activation, output_activation)
+        self.value = MLP(state[0], list(hidden_sizes)+[1], activation, None)
 
-    # default policy builder depends on action space
-    if policy is None and isinstance(action_space, Box):
-        policy = mlp_gaussian_policy
-    elif policy is None and isinstance(action_space, Discrete):
-        policy = mlp_categorical_policy
-
-    with tf.variable_scope('pi'):
-        pi, logp, logp_pi = policy(x, a, hidden_sizes, activation, output_activation, action_space)
-    with tf.variable_scope('v'):
-        v = tf.squeeze(mlp(x, list(hidden_sizes)+[1], activation, None), axis=1)
-    return pi, logp, logp_pi, v
+    def forward(self, x, a = None):
+        pi, logp, logp_pi = self.policy(x, a)
+        v = self.value(x)
+        return pi, logp, logp_pi, v
