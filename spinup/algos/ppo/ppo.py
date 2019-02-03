@@ -103,9 +103,8 @@ def ppo(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
         env_fn : A function which creates a copy of the environment.
             The environment must satisfy the OpenAI Gym API.
 
-        actor_critic: A function which takes in placeholder symbols 
-            for state, ``x_ph``, and action, ``a_ph``, and returns the main 
-            outputs from the agent's Tensorflow computation graph:
+        actor_critic: A reference to ActorCritic class which after instantiation
+            takes state, ``x``, and action, ``a``, and returns:
 
             ===========  ================  ======================================
             Symbol       Shape             Description
@@ -113,13 +112,13 @@ def ppo(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
             ``pi``       (batch, act_dim)  | Samples actions from policy given 
                                            | states.
             ``logp``     (batch,)          | Gives log probability, according to
-                                           | the policy, of taking actions ``a_ph``
-                                           | in states ``x_ph``.
+                                           | the policy, of taking actions ``a``
+                                           | in states ``x``.
             ``logp_pi``  (batch,)          | Gives log probability, according to
                                            | the policy, of the action sampled by
                                            | ``pi``.
             ``v``        (batch,)          | Gives the value estimate for states
-                                           | in ``x_ph``. (Critical: make sure 
+                                           | in ``x``. (Critical: make sure
                                            | to flatten this!)
             ===========  ================  ======================================
 

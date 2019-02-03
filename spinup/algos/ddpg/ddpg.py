@@ -55,9 +55,8 @@ def ddpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
         env_fn : A function which creates a copy of the environment.
             The environment must satisfy the OpenAI Gym API.
 
-        actor_critic: A function which takes in placeholder symbols 
-            for state, ``x_ph``, and action, ``a_ph``, and returns the main 
-            outputs from the agent's Tensorflow computation graph:
+        actor_critic: A reference to ActorCritic class which after instantiation
+            takes state, ``x``, and action, ``a``, and returns:
 
             ===========  ================  ======================================
             Symbol       Shape             Description
@@ -65,10 +64,10 @@ def ddpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
             ``pi``       (batch, act_dim)  | Deterministically computes actions
                                            | from policy given states.
             ``q``        (batch,)          | Gives the current estimate of Q* for 
-                                           | states in ``x_ph`` and actions in
-                                           | ``a_ph``.
+                                           | states in ``x_`` and actions in
+                                           | ``a``.
             ``q_pi``     (batch,)          | Gives the composition of ``q`` and 
-                                           | ``pi`` for states in ``x_ph``: 
+                                           | ``pi`` for states in ``x``:
                                            | q(x, pi(x)).
             ===========  ================  ======================================
 
