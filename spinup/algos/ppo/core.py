@@ -17,7 +17,7 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
         layers = []
         prev_h = in_dim
-        for h in hidden_sizes[1:-1]:
+        for h in hidden_sizes[:-1]:
             layers.append(nn.Linear(prev_h, h))
             layers.append(activation())
             prev_h = h
