@@ -2,9 +2,12 @@ import time
 import joblib
 import os
 import os.path as osp
-import tensorflow as tf
+import torch
+from torch import Tensor
 from spinup import EpochLogger
-from spinup.utils.logx import restore_tf_graph
+
+#TODO multiple GPU
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def load_policy(fpath, itr='last', deterministic=False):
 
@@ -16,20 +19,10 @@ def load_policy(fpath, itr='last', deterministic=False):
         itr = '%d'%itr
 
     # load the things!
-    sess = tf.Session()
-    model = restore_tf_graph(sess, osp.join(fpath, 'simple_save'+itr))
-
-    # get the correct op for executing actions
-    if deterministic and 'mu' in model.keys():
-        # 'deterministic' is only a valid option for SAC policies
-        print('Using deterministic action op.')
-        action_op = model['mu']
-    else:
-        print('Using default action op.')
-        action_op = model['pi']
+    model = torch.load(osp.join(fpath, 'simple_save'+itr)).eval().to(device)
 
     # make function for producing an action given a single state
-    get_action = lambda x : sess.run(action_op, feed_dict={model['x']: x[None,:]})[0]
+    get_action = model.policy
 
     # try to load environment from save
     # (sometimes this will fail because the environment could not be pickled)
@@ -56,8 +49,8 @@ def run_policy(env, get_action, max_ep_len=None, num_episodes=100, render=True):
             env.render()
             time.sleep(1e-3)
 
-        a = get_action(o)
-        o, r, d, _ = env.step(a)
+        a = get_action(Tensor(o.reshape(1,-1)).to(device))[0]
+        o, r, d, _ = env.step(a.cpu().detach().numpy())
         ep_ret += r
         ep_len += 1
 

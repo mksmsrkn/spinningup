@@ -41,13 +41,13 @@ class ActorCritic(nn.Module):
         act_dim = action_space.shape[0]
         act_limit = action_space.high[0]
 
-        self.pi = MLP(state_dim, list(hidden_sizes)+[act_dim], activation,
+        self.policy = MLP(state_dim, list(hidden_sizes)+[act_dim], activation,
                       output_activation, output_scaler=act_limit)
         self.q1 = MLP(state_dim + act_dim, list(hidden_sizes)+[1], activation, None)
         self.q2 = MLP(state_dim + act_dim, list(hidden_sizes)+[1], activation, None)
 
     def forward(self, x, a = None):
-        pi = self.pi(x)
+        pi = self.policy(x)
         if a is None:
             return pi
         else:

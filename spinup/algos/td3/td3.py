@@ -158,22 +158,19 @@ def td3(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
     actor_critic_target = actor_critic(obs_dim, **ac_kwargs).to(device)
 
     # Count variables
-    var_counts = tuple(core.count_vars(model) for model in [actor_critic_main.pi,
+    var_counts = tuple(core.count_vars(model) for model in [actor_critic_main.policy,
                                                             actor_critic_main.q1,
                                                             actor_critic_main.q2,
                                                             actor_critic_main])
     logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d, \t total: %d\n'%var_counts)
 
     # Optimizers
-    pi_optimizer = optim.Adam(actor_critic_main.pi.parameters(), lr=pi_lr)
+    pi_optimizer = optim.Adam(actor_critic_main.policy.parameters(), lr=pi_lr)
     main_q_parameters = [*actor_critic_main.q1.parameters(),*actor_critic_main.q2.parameters()]
     q_optimizer = optim.Adam(main_q_parameters, lr=q_lr)
 
     # Initializing targets to match main variables
     actor_critic_target.load_state_dict(actor_critic_main.state_dict())
-
-#     # Setup model saving
-#     logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph}, outputs={'pi': pi, 'q1': q1, 'q2': q2}) # TODO configure logger
 
     def get_action(o, noise_scale):
         a = actor_critic_main(Tensor(o.reshape(1,-1)).to(device))
@@ -237,7 +234,7 @@ def td3(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
                                   ['obs1', 'obs2', 'acts', 'rews', 'done']]
 
                 _, q1, q2, q1_pi = actor_critic_main(x, a)
-                pi_targ = actor_critic_target.pi(x2)
+                pi_targ = actor_critic_target.policy(x2)
 
                 # Target policy smoothing, by adding clipped noise to target actions
                 epsilon = torch.randn_like(pi_targ) * target_noise
@@ -286,7 +283,7 @@ def td3(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
 
             # Save model
             if (epoch % save_freq == 0) or (epoch == epochs-1):
-                logger.save_state({'env': env}, None)
+                logger.save_state({'env': env}, actor_critic_main, None)
 
             # Test the performance of the deterministic version of the agent.
             test_agent()

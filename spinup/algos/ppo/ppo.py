@@ -205,9 +205,6 @@ def ppo(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
     # Sync params across processes
     # sync_all_params() # TODO MPI pytorch
 
-    ## Setup model saving
-    # logger.setup_tf_saver(sess, inputs={'x': x_ph}, outputs={'pi': pi, 'v': v}) # TODO configure logger
-
     def update():
         actor_critic.train()
         obs, act, adv, ret, logp_old = map(lambda x: Tensor(x).to(device), buf.get())
@@ -297,7 +294,7 @@ def ppo(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
 
         # Save model
         if (epoch % save_freq == 0) or (epoch == epochs-1):
-            logger.save_state({'env': env}, None)
+            logger.save_state({'env': env}, actor_critic, None)
 
         # Perform PPO update!
         update()

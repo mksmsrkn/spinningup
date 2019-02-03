@@ -25,13 +25,13 @@ Get started at [spinningup.openai.com](https://spinningup.openai.com)!
 ----------
 #### Working:
 * Setup process (now in python 3.7)
+* Logger (with model saving)
 * VPG (CPU, single GPU)
 * PPO (CPU, single GPU)
 * DDPG (CPU, single GPU)
 * TD3 (CPU, single GPU)
 
 #### TODO (up next):
-* Adapt Logger (model/env saver) to Pytorch
 * MPI pytorch
 * Tensorflow vs Pytorch Benchmark
 

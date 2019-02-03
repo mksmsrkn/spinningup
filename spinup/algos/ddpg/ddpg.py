@@ -64,7 +64,7 @@ def ddpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
             ``pi``       (batch, act_dim)  | Deterministically computes actions
                                            | from policy given states.
             ``q``        (batch,)          | Gives the current estimate of Q* for 
-                                           | states in ``x_`` and actions in
+                                           | states in ``x`` and actions in
                                            | ``a``.
             ``q_pi``     (batch,)          | Gives the composition of ``q`` and 
                                            | ``pi`` for states in ``x``:
@@ -144,17 +144,14 @@ def ddpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
     actor_critic_target = actor_critic(obs_dim, **ac_kwargs).to(device)
 
     # Count variables
-    var_counts = tuple(core.count_vars(model) for model in [actor_critic_main.q,
-                                                            actor_critic_main.pi,
+    var_counts = tuple(core.count_vars(model) for model in [actor_critic_main.policy,
+                                                            actor_critic_main.q,
                                                             actor_critic_main])
     logger.log('\nNumber of parameters: \t pi: %d, \t q: %d, \t total: %d\n'%var_counts)
 
     # Optimizers
-    pi_optimizer = optim.Adam(actor_critic_main.pi.parameters(), lr=pi_lr)
+    pi_optimizer = optim.Adam(actor_critic_main.policy.parameters(), lr=pi_lr)
     q_optimizer = optim.Adam(actor_critic_main.q.parameters(), lr=q_lr)
-
-    # Setup model saving
-    # logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph}, outputs={'pi': pi, 'q': q}) # TODO configure logger
 
     def get_action(o, noise_scale):
         a = actor_critic_main(Tensor(o.reshape(1,-1)).to(device))
@@ -253,7 +250,7 @@ def ddpg(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
 
             # Save model
             if (epoch % save_freq == 0) or (epoch == epochs-1):
-                logger.save_state({'env': env}, None)
+                logger.save_state({'env': env}, actor_critic_main, None)
 
             # Test the performance of the deterministic version of the agent.
             test_agent()
