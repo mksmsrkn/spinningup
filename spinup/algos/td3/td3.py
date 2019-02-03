@@ -1,11 +1,14 @@
 import numpy as np
-import tensorflow as tf
+import torch
+from torch import optim
+from torch import Tensor
 import gym
 import time
 from spinup.algos.td3 import core
-from spinup.algos.td3.core import get_vars
 from spinup.utils.logx import EpochLogger
 
+# TODO multiple devices
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class ReplayBuffer:
     """
@@ -42,7 +45,7 @@ class ReplayBuffer:
 TD3 (Twin Delayed DDPG)
 
 """
-def td3(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0, 
+def td3(env_fn, actor_critic=core.ActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=5000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, pi_lr=1e-3, q_lr=1e-3, batch_size=100, start_steps=10000, 
         act_noise=0.1, target_noise=0.2, noise_clip=0.5, policy_delay=2, 
@@ -53,9 +56,8 @@ def td3(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
         env_fn : A function which creates a copy of the environment.
             The environment must satisfy the OpenAI Gym API.
 
-        actor_critic: A function which takes in placeholder symbols 
-            for state, ``x_ph``, and action, ``a_ph``, and returns the main 
-            outputs from the agent's Tensorflow computation graph:
+        actor_critic: A reference to ActorCritic class which after instantiation
+            takes state, ``x``, and action, ``a``, and returns:
 
             ===========  ================  ======================================
             Symbol       Shape             Description
@@ -63,13 +65,13 @@ def td3(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
             ``pi``       (batch, act_dim)  | Deterministically computes actions
                                            | from policy given states.
             ``q1``       (batch,)          | Gives one estimate of Q* for 
-                                           | states in ``x_ph`` and actions in
-                                           | ``a_ph``.
+                                           | states in ``x`` and actions in
+                                           | ``a``.
             ``q2``       (batch,)          | Gives another estimate of Q* for 
-                                           | states in ``x_ph`` and actions in
-                                           | ``a_ph``.
+                                           | states in ``x`` and actions in
+                                           | ``a``.
             ``q1_pi``    (batch,)          | Gives the composition of ``q1`` and 
-                                           | ``pi`` for states in ``x_ph``: 
+                                           | ``pi`` for states in ``x``:
                                            | q1(x, pi(x)).
             ===========  ================  ======================================
 
@@ -130,8 +132,12 @@ def td3(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
 
-    tf.set_random_seed(seed)
+    torch.manual_seed(seed)
     np.random.seed(seed)
+
+    # https://pytorch.org/docs/master/notes/randomness.html#cudnn
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     env, test_env = env_fn(), env_fn()
     obs_dim = env.observation_space.shape[0]
@@ -143,69 +149,35 @@ def td3(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
     # Share information about action space with policy architecture
     ac_kwargs['action_space'] = env.action_space
 
-    # Inputs to computation graph
-    x_ph, a_ph, x2_ph, r_ph, d_ph = core.placeholders(obs_dim, act_dim, obs_dim, None, None)
-
-    # Main outputs from computation graph
-    with tf.variable_scope('main'):
-        pi, q1, q2, q1_pi = actor_critic(x_ph, a_ph, **ac_kwargs)
-    
-    # Target policy network
-    with tf.variable_scope('target'):
-        pi_targ, _, _, _  = actor_critic(x2_ph, a_ph, **ac_kwargs)
-    
-    # Target Q networks
-    with tf.variable_scope('target', reuse=True):
-
-        # Target policy smoothing, by adding clipped noise to target actions
-        epsilon = tf.random_normal(tf.shape(pi_targ), stddev=target_noise)
-        epsilon = tf.clip_by_value(epsilon, -noise_clip, noise_clip)
-        a2 = pi_targ + epsilon
-        a2 = tf.clip_by_value(a2, -act_limit, act_limit)
-
-        # Target Q-values, using action from target policy
-        _, q1_targ, q2_targ, _ = actor_critic(x2_ph, a2, **ac_kwargs)
-
     # Experience buffer
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
 
+    actor_critic_main = actor_critic(obs_dim, **ac_kwargs).to(device)
+    # Note that the action placeholder going to targer actor_critic here
+    # is irrelevant, because we only need q_targ(s, pi_targ(s)).
+    actor_critic_target = actor_critic(obs_dim, **ac_kwargs).to(device)
+
     # Count variables
-    var_counts = tuple(core.count_vars(scope) for scope in ['main/pi', 'main/q1', 'main/q2', 'main'])
-    print('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d, \t total: %d\n'%var_counts)
+    var_counts = tuple(core.count_vars(model) for model in [actor_critic_main.pi,
+                                                            actor_critic_main.q1,
+                                                            actor_critic_main.q2,
+                                                            actor_critic_main])
+    logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d, \t total: %d\n'%var_counts)
 
-    # Bellman backup for Q functions, using Clipped Double-Q targets
-    min_q_targ = tf.minimum(q1_targ, q2_targ)
-    backup = tf.stop_gradient(r_ph + gamma*(1-d_ph)*min_q_targ)
-
-    # TD3 losses
-    pi_loss = -tf.reduce_mean(q1_pi)
-    q1_loss = tf.reduce_mean((q1-backup)**2)
-    q2_loss = tf.reduce_mean((q2-backup)**2)
-    q_loss = q1_loss + q2_loss
-
-    # Separate train ops for pi, q
-    pi_optimizer = tf.train.AdamOptimizer(learning_rate=pi_lr)
-    q_optimizer = tf.train.AdamOptimizer(learning_rate=q_lr)
-    train_pi_op = pi_optimizer.minimize(pi_loss, var_list=get_vars('main/pi'))
-    train_q_op = q_optimizer.minimize(q_loss, var_list=get_vars('main/q'))
-
-    # Polyak averaging for target variables
-    target_update = tf.group([tf.assign(v_targ, polyak*v_targ + (1-polyak)*v_main)
-                              for v_main, v_targ in zip(get_vars('main'), get_vars('target'))])
+    # Optimizers
+    pi_optimizer = optim.Adam(actor_critic_main.pi.parameters(), lr=pi_lr)
+    main_q_parameters = [*actor_critic_main.q1.parameters(),*actor_critic_main.q2.parameters()]
+    q_optimizer = optim.Adam(main_q_parameters, lr=q_lr)
 
     # Initializing targets to match main variables
-    target_init = tf.group([tf.assign(v_targ, v_main)
-                              for v_main, v_targ in zip(get_vars('main'), get_vars('target'))])
+    actor_critic_target.load_state_dict(actor_critic_main.state_dict())
 
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
-    sess.run(target_init)
-
-    # Setup model saving
-    logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph}, outputs={'pi': pi, 'q1': q1, 'q2': q2})
+#     # Setup model saving
+#     logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph}, outputs={'pi': pi, 'q1': q1, 'q2': q2}) # TODO configure logger
 
     def get_action(o, noise_scale):
-        a = sess.run(pi, feed_dict={x_ph: o.reshape(1,-1)})[0]
+        a = actor_critic_main(Tensor(o.reshape(1,-1)).to(device))
+        a = a.cpu().detach().numpy()
         a += noise_scale * np.random.randn(act_dim)
         return np.clip(a, -act_limit, act_limit)
 
@@ -261,20 +233,49 @@ def td3(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
             """
             for j in range(ep_len):
                 batch = replay_buffer.sample_batch(batch_size)
-                feed_dict = {x_ph: batch['obs1'],
-                             x2_ph: batch['obs2'],
-                             a_ph: batch['acts'],
-                             r_ph: batch['rews'],
-                             d_ph: batch['done']
-                            }
-                q_step_ops = [q_loss, q1, q2, train_q_op]
-                outs = sess.run(q_step_ops, feed_dict)
-                logger.store(LossQ=outs[0], Q1Vals=outs[1], Q2Vals=outs[2])
+                x, x2, a, r, d = [Tensor(batch[k]).to(device) for k in
+                                  ['obs1', 'obs2', 'acts', 'rews', 'done']]
+
+                _, q1, q2, q1_pi = actor_critic_main(x, a)
+                pi_targ = actor_critic_target.pi(x2)
+
+                # Target policy smoothing, by adding clipped noise to target actions
+                epsilon = torch.randn_like(pi_targ) * target_noise
+                epsilon = torch.clamp(epsilon, -noise_clip, noise_clip)
+                a2 = pi_targ + epsilon
+                a2 = torch.clamp(a2, -act_limit, act_limit)
+                _, q1_targ, q2_targ, _ = actor_critic_target(x2, a2)
+
+                # Bellman backup for Q functions, using Clipped Double-Q targets
+                min_q_targ = torch.min(q1_targ, q2_targ)
+                backup = (r + gamma*(1-d)*min_q_targ).detach()
+
+                # TD3 losses
+                q1_loss = ((q1-backup)**2).mean()
+                q2_loss = ((q2-backup)**2).mean()
+                q_loss = q1_loss + q2_loss
+
+                # Q-learning update
+                q_optimizer.zero_grad()
+                q_loss.backward()
+                q_optimizer.step()
+                logger.store(LossQ=q_loss,
+                             Q1Vals=q1.cpu().detach().numpy(),
+                             Q2Vals=q2.cpu().detach().numpy())
 
                 if j % policy_delay == 0:
+                    pi_loss = -q1_pi.mean() # NOTE: q1_pi is outdated
                     # Delayed policy update
-                    outs = sess.run([pi_loss, train_pi_op, target_update], feed_dict)
-                    logger.store(LossPi=outs[0])
+                    pi_optimizer.zero_grad()
+                    pi_loss.backward()
+                    pi_optimizer.step()
+                    logger.store(LossPi=pi_loss)
+
+                    # Polyak averaging for target variables
+                    # Credits: https://github.com/ghliu/pytorch-ddpg/blob/master/util.py
+                    params = zip(actor_critic_target.parameters(), actor_critic_main.parameters())
+                    for ac_target, ac_main in params:
+                        ac_target.data.copy_(ac_main.data * (1.0 - polyak) + ac_target.data * polyak)
 
             logger.store(EpRet=ep_ret, EpLen=ep_len)
             o, r, d, ep_ret, ep_len = env.reset(), 0, False, 0, 0

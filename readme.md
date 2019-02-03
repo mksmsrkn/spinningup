@@ -28,11 +28,13 @@ Get started at [spinningup.openai.com](https://spinningup.openai.com)!
 * VPG (CPU, single GPU)
 * PPO (CPU, single GPU)
 * DDPG (CPU, single GPU)
+* TD3 (CPU, single GPU)
 
 #### TODO (up next):
 * Adapt Logger (model/env saver) to Pytorch
 * MPI pytorch
+* Tensorflow vs Pytorch Benchmark
 
 #### Known issues:
 * A difference has been noticed when training a simple environment, for TF default parameters would get Cartpole AverageEpRet to 100  for pytorch it barely gets over 40, (if the lr is changed to 0.01 for both PI and V learners, then it easily reaches 200)
-* --hid[h] [16, 32] Number of parameters with TF (pi: 690, v: 657), with Pytorch (pi: 226, v: 193) for CartPole
+* Network parameter counter doesn't show the same results for TF and Pytorch (e.g. --hid[h] [16, 32] Number of parameters with TF (pi: 690, v: 657), with Pytorch (pi: 226, v: 193) for CartPole)
