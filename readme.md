@@ -36,6 +36,7 @@ Get started at [spinningup.openai.com](https://spinningup.openai.com)!
 * TRPO (**Comming soon!**)
 * Tensorflow vs Pytorch Benchmark
 * MPI pytorch
+* Excercise section
 
 #### Known issues:
 * A difference has been noticed when training a simple environment, for TF default parameters would get Cartpole AverageEpRet to 100  for pytorch it barely gets over 40, (if the lr is changed to 0.01 for both PI and V learners, then it easily reaches 200)
